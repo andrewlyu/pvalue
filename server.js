@@ -1,98 +1,90 @@
 const express = require('express');
+const path = require('path');
 const puppeteer = require('puppeteer');
 const cors = require('cors');
-const path = require('path');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
+// Enable CORS
 app.use(cors());
-app.use(express.static('public'));
 
-// Serve the main page
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+// Serve static files from the public directory
+app.use(express.static(path.join(__dirname, 'public')));
 
-// Cache for storing browser instance
-let browserInstance = null;
+// Store browser instance
+let browser = null;
 
-// Initialize browser instance
+// Initialize browser
 async function initBrowser() {
-    if (!browserInstance) {
-        browserInstance = await puppeteer.launch({
-            headless: 'new',
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-            defaultViewport: { width: 1280, height: 800 }
+    if (!browser) {
+        browser = await puppeteer.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--disable-gpu',
+                '--window-size=1920x1080',
+            ]
         });
     }
-    return browserInstance;
+    return browser;
 }
 
-// API endpoint to fetch and parse personal values
-app.get('/api/values/:resultKey', async (req, res) => {
-    let page;
+// API endpoint to fetch values
+app.get('/api/values', async (req, res) => {
+    const resultKey = req.query.resultKey;
+    
+    if (!resultKey) {
+        return res.status(400).json({ error: 'Result key is required' });
+    }
+
     try {
-        const { resultKey } = req.params;
-        const url = `https://personalvalu.es/results/${resultKey}`;
-        
-        // Get or create browser instance
         const browser = await initBrowser();
+        const page = await browser.newPage();
         
-        // Create new page
-        page = await browser.newPage();
+        // Set a longer timeout for navigation
+        await page.setDefaultNavigationTimeout(30000);
         
-        // Set timeout to 10 seconds
-        await page.setDefaultNavigationTimeout(10000);
+        // Navigate to the URL
+        const url = `https://personalvalu.es/results/${resultKey}`;
+        await page.goto(url, { waitUntil: 'networkidle0' });
         
-        // Navigate to the page and wait for content to load
-        await page.goto(url, { 
-            waitUntil: 'networkidle0',
-            timeout: 10000
-        });
-        
-        // Wait for the value containers to be present
-        await page.waitForSelector('div[class*="position-"]', { timeout: 5000 });
+        // Wait for the content to load
+        await page.waitForSelector('div[class*="position-"]', { timeout: 10000 });
         
         // Extract values
         const values = await page.evaluate(() => {
             const valueElements = document.querySelectorAll('div[class*="position-"]');
             return Array.from(valueElements).map(element => {
-                const title = element.querySelector('h1')?.textContent?.trim();
-                const description = element.querySelector('h2')?.textContent?.trim();
-                const rank = parseInt(element.className.match(/position-(\d+)/)[1]);
+                const titleElement = element.querySelector('h1');
+                const descriptionElement = element.querySelector('h2');
+                const position = element.className.match(/position-(\d+)/)?.[1] || '';
                 
-                return { rank, name: title, description };
-            }).filter(v => v.name && v.description);
+                return {
+                    rank: position,
+                    name: titleElement ? titleElement.textContent.trim() : '',
+                    description: descriptionElement ? descriptionElement.textContent.trim() : ''
+                };
+            });
         });
 
+        await page.close();
+        
         if (values.length === 0) {
-            console.log('No values found in the HTML content');
-            return res.status(404).json({ error: 'No values found on the page' });
+            return res.status(404).json({ error: 'No values found' });
         }
-
-        // Sort by rank to ensure correct order
-        values.sort((a, b) => a.rank - b.rank);
 
         res.json({ values });
     } catch (error) {
         console.error('Error fetching values:', error);
         res.status(500).json({ error: 'Failed to fetch values' });
-    } finally {
-        if (page) {
-            await page.close();
-        }
     }
 });
 
-// Cleanup browser instance on server shutdown
-process.on('SIGINT', async () => {
-    if (browserInstance) {
-        await browserInstance.close();
-    }
-    process.exit();
-});
-
-app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+// Start the server
+app.listen(PORT, () => {
+    console.log(`Server running at http://localhost:${PORT}`);
 }); 
