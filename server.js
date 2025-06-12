@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
 const cors = require('cors');
 
 const app = express();
@@ -27,7 +27,8 @@ async function initBrowser() {
                 '--disable-accelerated-2d-canvas',
                 '--disable-gpu',
                 '--window-size=1920x1080',
-            ]
+            ],
+            executablePath: process.env.CHROME_BIN || '/usr/bin/google-chrome'
         });
     }
     return browser;
