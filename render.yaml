@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: pvalue
+    env: node
+    buildCommand: |
+      npm install
+      npm install puppeteer
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production 
